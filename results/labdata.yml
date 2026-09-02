@@ -1,0 +1,4 @@
+files:
+  ctcf_encode_files.tsv: blah
+  ctcf_sites_hg38_chm13.parquet: blah
+  ctcf_sites_hg38.parquet: blah

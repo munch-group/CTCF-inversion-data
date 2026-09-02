@@ -1,14 +1,10 @@
 project:
   type: book
-  post-render: 
-    # - quarto render --profile slides
-    - quarto render slides/
-    - quarto render thesis/
-    - quarto render manuscript/
     
 execute:
   freeze: auto
   echo: true
+  eval: false
       
 format:
   html:
@@ -28,26 +24,18 @@ comments:
 lightbox: true
 
 book:
-  repo-url: "https://github.com/munch-group/munch-group-project"
+  repo-url: "https://github.com/munch-group/CTCF-inversion-data"
   repo-actions: [edit, issue, source]  
-  title: "munch-group-project"
+  title: "CTCF-inversion-data"
   author: "Joanna Doh"  
   sidebar:
     collapse-level: 1
     search: true  
   chapters:
     - index.qmd
-    - part: "Thesis"
-      chapters:
-      # (the same files must be listed _quarto-slides.yml to render as slides)
-      - thesis/index.qmd 
-    - part: "Slides"
-      chapters:
-      # (the same files must be listed _quarto-slides.yml to render as slides)
-      - slides/index.qmd 
     - part: "Notebooks"
       chapters: 
-      - notebooks/example.ipynb
+      - notebooks/visualization.ipynb
     - part: "Workflows"
       chapters: 
       - workflow.py

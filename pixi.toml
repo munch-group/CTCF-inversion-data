@@ -1,7 +1,7 @@
 [workspace]
 authors = ["Your name <your@email.com>"]
 channels = ["conda-forge", "munch-group"]
-name = "munch-group-project"
+name = "CTCF-inversion-data"
 platforms = ["linux-64", "osx-arm64"]
 version = "0.1.0"
 

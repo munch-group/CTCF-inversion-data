@@ -1,0 +1,15 @@
+CTCF motif within +/-100bp of summit (MA0139.1, rel >= 0.8)
+  random chr21 positions    :   7.3%  (n=5,000)
+  sites in    1 experiment  :  18.7%  (n=1,988)
+  sites in  2-9 experiments :  40.8%  (n=1,177)
+  sites in >=10 experiments :  72.5%  (n=1,242)
+  sites in >=100 experiments:  88.1%  (n=464)
+  sites in >=300 experiments:  93.9%  (n=230)
+  ... same sites, +5kb      :  10.1%  (n=464) <- negative control
+
+  PASS  recurrent sites (>=100 expts) are >80% motif-positive
+  PASS  random background is <15%
+  PASS  +5kb shifted control is <20%
+  PASS  motif rate rises with recurrence
+
+MOTIF VALIDATION: PASS

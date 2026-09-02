@@ -1,0 +1,32 @@
+{
+  "version": 2,
+  "group_cols": null,
+  "dtypes": {
+    "chrom": "category",
+    "start": "int32",
+    "end": "int32",
+    "summit": "int32",
+    "n_experiments": "int16",
+    "n_biosamples": "int16",
+    "frac_experiments": "float32",
+    "max_signal": "float32",
+    "mean_signal": "float32",
+    "max_neglog10q": "float32",
+    "n_peaks": "int32",
+    "width": "int32",
+    "chm13_chrom": "string",
+    "chm13_start": "int64",
+    "chm13_end": "int64",
+    "chm13_summit": "int64",
+    "chm13_strand": "string",
+    "chm13_status": "category"
+  },
+  "files": [
+    {
+      "path": "part-00000.parquet",
+      "partition": {},
+      "size": 17453997,
+      "num_rows": 337104
+    }
+  ]
+}

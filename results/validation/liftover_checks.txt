@@ -1,0 +1,37 @@
+liftover consistency checks
+
+  PASS  all lifted chromosomes exist in hs1
+  PASS  within CHM13 chromosome bounds
+  PASS  summit inside lifted interval
+  PASS  start < end
+  PASS  unmapped rows blanked
+  PASS  width within tolerance for every unique site
+  PASS  within-chain monotonicity (111 chains, 0 violating)
+
+  width identical for 95.76% of unique sites
+
+mapping status:
+  unique    333,952
+  gapped      2,032
+  partial       591
+  unmapped      529
+
+  minus strand (reference orientation flip): 1,500
+  lifted to a different chromosome:          205
+
+contiguous reference-orientation-flipped blocks (>=20 sites):
+  these are loci where GRCh38 and CHM13 carry opposite alleles;
+  polarise every inversion callset to one reference before merging.
+  chr9    60,758,572-65,678,984     4.92 Mb    39 sites -> chr9
+  chr1   144,412,607-149,076,306    4.66 Mb   221 sites -> chr1
+  chr8     8,059,041-12,488,451     4.43 Mb   610 sites -> chr8
+  chr16   32,897,720-35,909,432     3.01 Mb    60 sites -> chr16
+  chr21    8,596,010-10,542,796     1.95 Mb    48 sites -> chr14
+  chr20   29,044,194-30,922,488     1.88 Mb    24 sites -> chr20
+  chr22   10,573,243-12,210,574     1.64 Mb    26 sites -> chr22
+  chr16   21,584,025-22,437,291     0.85 Mb   131 sites -> chr16
+  chr9    40,903,945-41,508,149     0.60 Mb    21 sites -> chr9
+  chr3   195,693,952-195,954,668    0.26 Mb    63 sites -> chr3
+  chr16   28,480,491-28,623,686     0.14 Mb    41 sites -> chr16
+
+LIFTOVER VALIDATION: PASS

@@ -1,0 +1,14 @@
+awk reimplementation vs python consensus on chr21
+  awk sites    4,407
+  python sites 4,407
+  start            exact mismatches: 0
+  end              exact mismatches: 0
+  summit           exact mismatches: 0
+  n_experiments    exact mismatches: 0
+  n_biosamples     exact mismatches: 0
+  n_peaks          exact mismatches: 0
+  max_signal       max abs diff: 1.210e-04
+  mean_signal      max abs diff: 1.400e-05
+  max_neglog10q    max abs diff: 0.000e+00
+
+RECIPE REPRODUCES PYTHON OUTPUT: True

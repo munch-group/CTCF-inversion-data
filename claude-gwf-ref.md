@@ -30,7 +30,7 @@ Local reference compiled from <https://gwf.app/> (gwf 2.1.1). GWF is a Python wo
 
 ## Core concepts
 
-- **Target** — a single unit of computation consuming zero or more input files and producing zero or more output files. Either named (via `gwf.target(...)`) or anonymous (via `AnonymousTarget(...)`, returned from a template function). Targets only (re)run when outputs are missing or older than inputs, or when the spec has changed.
+- **Target** — a single unit of computation consuming zero or more input files and producing zero or more output files. Either named (via `gwf.target(...)`) or anonymous (via `AnonymousTarget(...)`, returned from a template function). Targets only (re)run when outputs are missing or older than inputs. (Spec changes are *not* reliably detected in this project — see [Gotchas](#gotchas).)
 - **Template function** — a plain Python function returning an `AnonymousTarget`. The reusable building block. Parameterize it, then instantiate many targets from it with `gwf.target_from_template` (one-off) or `gwf.map` (fan-out).
 - **Dependency resolution is filename-based.** GWF matches a target's declared `inputs` against every other target's declared `outputs`; shared paths become edges. There is no explicit `depends_on=`.
 - **Backend** — where targets run: `slurm`, `sge`, `lsf`, `pbs`, `local`. Chosen per project via `gwf config set backend <name>`; stored in `.gwfconf.json`.
@@ -712,7 +712,14 @@ Methods:
 - **Target names must be valid Python identifiers.** Dots are tolerated in some contexts (see large-workflows pattern, `Analyse.S1`) but safest to stick to `[A-Za-z_][A-Za-z0-9_]*`.
 - **File-based dependencies**: two targets writing the same output path is a hard error (`FileProvidedByMultipleTargetsError`). Keep outputs unique per target.
 - **`inputs=` must list everything the spec reads**; otherwise the producing target is not scheduled first, and your spec sees a stale or missing file.
-- **Spec changes invalidate caches** — modifying the Bash script forces reruns. GWF stores a hash of each target's spec.
+- **Spec changes do NOT trigger reruns here.** Upstream docs say GWF stores a hash of each
+  target's spec and reruns when it changes. Verified empirically in this project (gwf 2.1.1,
+  local backend, 2026-09-02): editing every spec in `workflow.py` and running `gwf run`
+  re-executed **nothing** — all 28 targets were reported up-to-date, and no spec-hash database
+  exists under `.gwf/` (only `local-backend-tracked.json` and `logs/`). Scheduling is decided
+  on output/input mtimes alone. **After editing a spec, use `gwf run --force`** (or delete the
+  affected outputs), otherwise you are still running the old script and the status output will
+  tell you everything is fine.
 - **Write-then-move, always**, for any target that writes outputs (see [Failure handling](#failure-handling--the-write-then-move-idiom)).
 - **Executors are Slurm-only** as of 2.1.1. Local/SGE/LSF/PBS ignore the `executor=` argument.
 - **`gwf run` checks file mtimes.** If target B edits target A's output in place, GWF thinks A needs to run again. Don't mutate another target's outputs — write your own.

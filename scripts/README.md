@@ -15,6 +15,12 @@ docstrings point there.
 | `build_consensus.py` | compilation — cluster pooled summits into consensus sites (§4–5) |
 | `liftover_chm13.py` | compilation — append T2T-CHM13v2.0 coordinates, keeping strand (§11) |
 | `export_parquet.py` | publication — shard a site table into a parquet dataset of sub-40 MB part files (§6.1) |
+| `ape_lib.py` | shared: T2T ape species map, guide-tree order, chain/chromAlias URLs |
+| `fetch_ape_chain_headers.py` | retrieval — stream one all-to-all chain file, keep header lines (§12.1) |
+| `fetch_chromalias.py` | retrieval — GenBank accession → chromosome name maps |
+| `call_inversions.py` | compilation — call inversions against the dominant orientation per pair (§12.2) |
+| `polarize_inversions.py` | compilation — place inversion loci on tree branches by Fitch parsimony (§13) |
+| `merge_inversions.py` | compilation — combine the per-species inversion tables (§12.3) |
 | `validate_motif.py` | validation — CTCF motif enrichment on chr21 vs shuffled controls (§9) |
 | `validate_liftover.py` | validation — CHM13 coordinate checks and orientation flips (§11.5–11.6) |
 | `dump_summits.py` + `merge_sites.awk` + `compare_consensus.py` | validation — re-derive one chromosome with an independent awk implementation and diff it (§7) |

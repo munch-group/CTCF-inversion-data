@@ -56,7 +56,11 @@ as parquet datasets rather than TSV, sharded into part files below GitHub's
 import glob
 import os
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, 'scripts')
+import ape_lib as A
 
 from gwf import AnonymousTarget, Workflow
 from gwf.workflow import collect
@@ -270,7 +274,8 @@ def export_parquet(tsv_path, name):
     plain HTTPS. The manifest is the tracked output: it exists only once the
     whole dataset has been written.
     """
-    dataset_dir = f'{RESULTS}/{name}'
+    # the '.parquet' suffix on the directory is the convention used in results/
+    dataset_dir = f'{RESULTS}/{name}.parquet'
     manifest = f'{dataset_dir}/_manifest.json'
 
     inputs = [tsv_path]
@@ -279,12 +284,135 @@ def export_parquet(tsv_path, name):
 
     # a dataset is a directory, so the write-then-move idiom moves the whole
     # directory; the old one is only removed once the new one is complete
-    tmp_dir = f'{TMP}/{name}'
+    tmp_dir = f'{TMP}/{name}.parquet'
     spec = f"""
     mkdir -p {RESULTS} {TMP}
     rm -rf {tmp_dir} &&
     pixi run python scripts/export_parquet.py --sites {tsv_path} --out {tmp_dir} &&
         rm -rf {dataset_dir} && mv {tmp_dir} {dataset_dir}
+    """
+    return AnonymousTarget(inputs=inputs, outputs=outputs, options=options, spec=spec)
+
+
+# %% [markdown]
+"""
+### Primate inversions
+
+Inversions between the T2T ape assemblies, read off the all-to-all chains of the
+8-way Cactus alignment. A chain records the orientation in which a target
+segment aligns to the query, so an inversion is a run of chains opposite to the
+surrounding synteny -- see `scripts/call_inversions.py` for the two corrections
+that makes necessary (assembly orientation conventions, and paralogy in raw
+un-netted chains).
+"""
+
+
+# %%
+def fetch_chromalias():
+    """
+    Downloads UCSC chromAlias tables mapping GenBank accessions to chromosome names.
+    """
+    output_dir = f'{STEPS}/apes'
+    alias_path = f'{output_dir}/chromalias.tsv'
+
+    inputs = []
+    outputs = {'alias_path': alias_path}
+    options = {'memory': '2g', 'walltime': '01:00:00'}
+
+    tmp = tmp_path(alias_path)
+    spec = f"""
+    mkdir -p {output_dir} {TMP}
+    pixi run python scripts/fetch_chromalias.py --out {tmp} &&
+        mv {tmp} {alias_path}
+    """
+    return AnonymousTarget(inputs=inputs, outputs=outputs, options=options, spec=spec)
+
+
+def fetch_ape_chains(query, ref='hg38'):
+    """
+    Streams one all-to-all chain file, keeping only the chain header lines (METHODS §12).
+    """
+    output_dir = f'{STEPS}/apes'
+    headers_path = f'{output_dir}/{ref}_vs_{query}.headers.txt'
+
+    inputs = []
+    outputs = {'headers_path': headers_path}
+    options = {'memory': '4g', 'walltime': '04:00:00'}
+
+    tmp = tmp_path(headers_path)
+    spec = f"""
+    mkdir -p {output_dir} {TMP}
+    pixi run python scripts/fetch_ape_chain_headers.py \\
+        --ref {ref} --query {query} --out {tmp} &&
+        mv {tmp} {headers_path}
+    """
+    return AnonymousTarget(inputs=inputs, outputs=outputs, options=options, spec=spec)
+
+
+def call_inversions(headers_path, alias_path, query, ref='hg38', min_len=1_000):
+    """
+    Calls inversions against the dominant orientation of each orthologous pair,
+    keeping only those colinear with the surrounding synteny (METHODS §12.2).
+    """
+    output_dir = f'{STEPS}/apes'
+    species = A.SPECIES.get(query, query)
+    inv_path = f'{output_dir}/inversions_{species}.tsv'
+    backbone_path = f'{output_dir}/backbone_{species}.bed'
+
+    inputs = [headers_path, alias_path, 'scripts/call_inversions.py']
+    outputs = {'inv_path': inv_path, 'backbone_path': backbone_path}
+    options = {'memory': '8g', 'walltime': '01:00:00'}
+
+    tmp, tmp_bb = tmp_path(inv_path), tmp_path(backbone_path)
+    spec = f"""
+    mkdir -p {output_dir} {TMP}
+    pixi run python scripts/call_inversions.py \\
+        --headers {headers_path} --alias {alias_path} --ref {ref} --query {query} \\
+        --min-len {min_len} --out {tmp} --backbone-out {tmp_bb} &&
+        mv {tmp} {inv_path} &&
+        mv {tmp_bb} {backbone_path}
+    """
+    return AnonymousTarget(inputs=inputs, outputs=outputs, options=options, spec=spec)
+
+
+def polarize_inversions(inv_paths, backbone_paths):
+    """
+    Places each inversion locus on a branch of the ape tree by Fitch parsimony (METHODS §13).
+    """
+    out_path = f'{RESULTS}/ape_inversions_polarized.tsv'
+
+    inputs = list(inv_paths) + list(backbone_paths) + ['scripts/polarize_inversions.py']
+    outputs = {'polarized_path': out_path}
+    options = {'memory': '8g', 'walltime': '00:30:00'}
+
+    tmp = tmp_path(out_path)
+    spec = f"""
+    mkdir -p {RESULTS} {TMP}
+    pixi run python scripts/polarize_inversions.py \\
+        --tables {' '.join(inv_paths)} \\
+        --backbones {' '.join(backbone_paths)} \\
+        --out {tmp} &&
+        mv {tmp} {out_path}
+    """
+    return AnonymousTarget(inputs=inputs, outputs=outputs, options=options, spec=spec)
+
+
+def merge_inversions(inv_paths):
+    """
+    Combines the per-species inversion tables into one catalogue.
+    """
+    out_path = f'{RESULTS}/ape_inversions.tsv'
+
+    inputs = list(inv_paths)
+    outputs = {'inversions_path': out_path}
+    options = {'memory': '4g', 'walltime': '00:20:00'}
+
+    tmp = tmp_path(out_path)
+    spec = f"""
+    mkdir -p {RESULTS} {TMP}
+    pixi run python scripts/merge_inversions.py \\
+        --tables {' '.join(inv_paths)} --out {tmp} &&
+        mv {tmp} {out_path}
     """
     return AnonymousTarget(inputs=inputs, outputs=outputs, options=options, spec=spec)
 
@@ -457,6 +585,35 @@ gwf.target_from_template(
 gwf.target_from_template(
     'export_sites_chm13_parquet',
     export_parquet(dual_path, 'ctcf_sites_hg38_chm13'))
+
+# --- primate inversions --------------------------------------------------- #
+
+APE_QUERIES = A.GCA_ASSEMBLIES + ['hs1']
+
+alias_target = gwf.target_from_template('fetch_chromalias', fetch_chromalias())
+alias_path = alias_target.outputs['alias_path']
+
+chain_targets = gwf.map(
+    fetch_ape_chains, [{'query': q} for q in APE_QUERIES],
+    name=lambda idx, t: f'fetch_ape_chains_{A.SPECIES[APE_QUERIES[idx]]}',
+)
+
+inversion_targets = gwf.map(
+    call_inversions,
+    [{'headers_path': o['headers_path'], 'query': q}
+     for o, q in zip(chain_targets.outputs, APE_QUERIES)],
+    extra=dict(alias_path=alias_path),
+    name=lambda idx, t: f'call_inversions_{A.SPECIES[APE_QUERIES[idx]]}',
+)
+
+inv_collected = collect(inversion_targets.outputs, ['inv_path', 'backbone_path'])
+
+gwf.target_from_template(
+    'merge_inversions', merge_inversions(inv_collected['inv_paths']))
+
+gwf.target_from_template(
+    'polarize_inversions',
+    polarize_inversions(inv_collected['inv_paths'], inv_collected['backbone_paths']))
 
 # --- validation ------------------------------------------------------------ #
 

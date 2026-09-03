@@ -21,9 +21,11 @@ scripts in `scripts/`. Section numbers referenced from the code point here.
 |---|---|
 | `workflow.py` | the GWF workflow: retrieval, compilation, validation |
 | `scripts/` | the steps the workflow invokes (see `scripts/README.md`) |
-| `results/ctcf_sites_hg38/` | **the dataset**: 337,104 CTCF sites, parquet (§6.1) |
-| `results/ctcf_sites_hg38_chm13/` | the same sites with CHM13 coordinates added, parquet (§11) |
+| `results/ctcf_sites_hg38.parquet/` | **the dataset**: 337,104 CTCF sites, parquet (§6.1) |
+| `results/ctcf_sites_hg38_chm13.parquet/` | the same sites with CHM13 coordinates added, parquet (§11) |
 | `results/ctcf_encode_files.tsv` | provenance manifest: the 435 ENCODE files used, with md5sums (§6.2) |
+| `results/ape_inversions.tsv` | inversions between the T2T ape assemblies (§12) |
+| `results/ape_inversions_polarized.tsv` | those loci placed on branches of the ape tree (§13) |
 | `results/validation/` | the three validation reports (§7, §9, §11.5) |
 | `steps/` | intermediates — metadata, peak chunks, reference files, the TSV site tables (git-ignored) |
 
@@ -38,7 +40,7 @@ Loading the dataset needs nothing but pandas:
 
 ```python
 from pd_lfs import read_parquet
-sites = read_parquet("results/ctcf_sites_hg38")
+sites = read_parquet("results/ctcf_sites_hg38.parquet")
 sites = sites[sites.n_experiments >= 10]      # see §10.1 before choosing a threshold
 ```
 
@@ -265,7 +267,7 @@ Rows are sorted by chromosome (`chr1`…`chr22`, `chrX`, `chrY`) then `start`.
 
 ## 6. Output file specification
 
-### 6.1 `results/ctcf_sites_hg38/`
+### 6.1 `results/ctcf_sites_hg38.parquet/`
 
 A parquet dataset written by `pd_lfs.write_parquet`: `part-*.parquet` shards each
 below 40 MB — comfortably under GitHub's 50 MB warning — plus a `_manifest.json`
@@ -490,7 +492,7 @@ accessions.
 
 ## 11. T2T-CHM13v2.0 coordinates (derived)
 
-`results/ctcf_sites_hg38_chm13/` is the §6.1 table with six columns appended. The
+`results/ctcf_sites_hg38_chm13.parquet/` is the §6.1 table with six columns appended. The
 hg38 columns are unchanged and remain authoritative; the CHM13 columns are
 **derived by liftover, not by native alignment**.
 
@@ -595,3 +597,252 @@ liftover itself is unreliable, and the 205 cross-chromosome lifts (mostly
 subtelomeric chr1→chr16/chr17 and chr21/chr22→chr14) reflect duplication
 ambiguity rather than real rearrangement. Treat cross-chromosome lifts as
 suspect regardless of their status flag.
+
+---
+
+## 12. Inversions between the T2T ape assemblies
+
+`results/ape_inversions.tsv` lists inverted segments between GRCh38 and each of
+the six T2T great-ape assemblies plus T2T-CHM13, in GRCh38 coordinates so the
+table joins directly onto the CTCF sites of §6.
+
+### 12.1 Source
+
+The 8-way Cactus alignment of T2T ape primary assemblies published at
+<https://cgl.gi.ucsc.edu/data/cactus/t2t-apes/8-t2t-apes-2023v2/>, exported to
+all-to-all chains with `cactus-hal2chains`. Species (from the alignment README):
+chimpanzee `GCA_028858775.2`, bonobo `GCA_029289425.2`, gorilla
+`GCA_029281585.2`, Sumatran orangutan `GCA_028885655.2`, Bornean orangutan
+`GCA_028885625.2`, siamang `GCA_028878055.2` (the outgroup), plus `hs1`
+(T2T-CHM13v2.0) and `hg38`. Files are named `<target>_vs_<query>.chain.gz`.
+
+Only the chain header lines are kept: the target/query span, orientation and
+score are all the caller needs, so ~1.4 GB of alignment blocks is streamed and
+discarded rather than stored.
+
+### 12.2 Calling inversions
+
+A chain records the orientation in which a target segment aligns to the query,
+so an inversion is a run of chains opposite to the surrounding synteny. Three
+corrections are essential.
+
+**Assembly orientation conventions.** Ape chromosomes are frequently stored
+reverse-complemented relative to their human orthologue — chimpanzee chr1
+(`CM054434.2`) aligns to human chr1 almost entirely on the minus strand, in both
+chain directions, and 41 of 99 chromosome pairs behave this way. Minus is the
+*normal* state there. The dominant orientation is therefore established per
+orthologous chromosome pair, weighted by chain score, and inversions are called
+against that rather than against the plus strand.
+
+**Paralogy.** These are raw all-to-all chains, not netted chains: every region
+also aligns to its paralogues, and the target spans sum to 4.6 Gb against a
+3.1 Gb genome. The caller keeps only the single orthologous query chromosome per
+reference chromosome (the one carrying the most chain score).
+
+**Two categories, two criteria.** Large pericentric inversions and small local
+inversions need different tests, and one compromise criterion serves both badly.
+They are called separately.
+
+*small* (1 kb – 1 Mb) requires **tight local embedding**: both immediately
+flanking backbone chains present within `--max-gap` (100 kb) of the candidate,
+the candidate's query midpoint lying between theirs, and its query span within
+0.5–2× its reference span. An inversion is a local orientation flip inside
+otherwise colinear synteny, and this states that directly.
+
+*pericentric* (≥ 1 Mb) cannot use that test at all: these span tens of megabases,
+so no backbone chain lies within 100 kb of both ends and the parent chain usually
+spans the whole event. They are instead required to be position-consistent — an
+inversion flips orientation but preserves position, so the backbone is
+interpolated to predict a query midpoint and the candidate must land within
+`--offset-tol-frac` × its span (floor `--offset-tol-min`).
+
+The small criterion was chosen against the two-human-assembly control, which
+should contain almost no fixed inversions. Over 1 kb – 1 Mb:
+
+| criterion | chimpanzee | control | ratio |
+|---|---|---|---|
+| scaled syntenic offset | 129 | 44 | 2.9 |
+| fixed offset ≤ 10 kb | 15 | 3 | 5.0 |
+| flanking, gap ≤ 1 Mb | 355 | 79 | 4.5 |
+| flanking, gap ≤ 20 kb | 21 | 2 | 10.5 |
+| **flanking, gap ≤ 100 kb + span ratio** | **96** | **3** | **32.0** |
+
+Chain nesting is deliberately *not* resolved by a coverage-based "best chain
+wins" assignment. An inverted segment sits in a double-sided gap of its parent
+chain, whose header span still covers it, so the parent would outrank and hide
+exactly the inversions being sought.
+
+Overlapping chains are merged within a category; the row records how many were
+merged (`n_chains`), their summed `chain_score`, and a `colinearity_margin`.
+
+
+### 12.3 Result
+
+690 inversions: 567 small (median 6.7 kb) and 123 pericentric.
+
+| species | small | median | pericentric | median |
+|---|---|---|---|---|
+| chimpanzee | 90 | 4.6 kb | 23 | 5.6 Mb |
+| bonobo | 83 | 6.3 kb | 18 | 7.1 Mb |
+| gorilla | 129 | 7.2 kb | 18 | 11.0 Mb |
+| Sumatran orangutan | 108 | 8.4 kb | 19 | 4.9 Mb |
+| Bornean orangutan | 116 | 7.3 kb | 18 | 4.7 Mb |
+| siamang | 34 | 5.6 kb | 15 | 19.4 Mb |
+| human CHM13 | 7 | 8.2 kb | 12 | 2.3 Mb |
+
+Counts are **not** directly comparable across species. Siamang, the outgroup,
+yields the fewest small calls not because it has fewest inversions but because
+its alignment is the most fragmented, so a flanking backbone chain within 100 kb
+is more often absent. Normalise by assayable sequence using the backbone BEDs
+before comparing rates between species.
+
+
+### 12.4 Validation
+
+**The known human–chimpanzee inversions.** Elevated minority-orientation
+fractions fall on human chr1, 4, 5, 9, 12, 15, 16, 17 and 18 — the nine
+classical pericentric inversions distinguishing the two karyotypes. chr1 and
+chr9 show it as a *plus*-strand minority precisely because those chimpanzee
+chromosomes are globally flipped. The five largest called intervals all span
+their centromere: chr5 18.6–96.6 Mb, chr12 20.8–68.0, chr9 40.6–86.2,
+chr17 8.0–49.5, chr4 44.8–85.0.
+
+**An independent alignment pipeline.** The `hg38` vs `hs1` row is a control: two
+human assemblies. Its calls recover the reference orientation flips found in §11
+through UCSC lastz/axtChain liftOver chains — a completely separate alignment
+pipeline — at 8p23.1 (called 7.13–12.56 Mb vs 8.06–12.49 there) and 16p12.2
+(21.56–22.70 vs 21.58–22.44); 1q21.1 is recovered only partially (a 0.32 Mb
+fragment of the 144.4–149.1 Mb region).
+
+### 12.5 Caveats
+
+**Pericentromeric and acrocentric regions inflate the totals.** The single
+largest control call, chr9:39.7–66.4 Mb (26.7 Mb, 20 merged chains), is the
+pericentromeric satellite region that GRCh38 leaves largely unresolved; it is an
+alignment artefact, not an inversion between two human assemblies. It alone is
+35% of the control total. Calls on chr9, chr21, chr22, chrY and around
+centromeres should be treated as unreliable until filtered against a centromere
+and satellite annotation. The median control call is 0.36 Mb.
+
+**One individual per species.** Each of these is a single assembly. An
+orientation difference between human and chimpanzee is either a fixed lineage
+difference *or* a polymorphism where the two sampled individuals happen to
+differ — with n = 1 the two cannot be distinguished. This is the essential
+difference between this table and a human polymorphic inversion callset, and it
+matters when the two are combined.
+
+**Inversions are called against GRCh38 only.** Polarising an inversion onto a
+branch of the ape tree needs the reciprocal comparisons too; the all-to-all
+chains support this, and `ape_lib.OUTGROUP_ORDER` records the divergence order
+from the alignment's guide tree, but the polarisation itself is not implemented
+here.
+
+---
+
+## 13. Polarising inversions onto branches of the ape tree
+
+`results/ape_inversions_polarized.tsv` places each inversion locus on a branch.
+
+### 13.1 Why polarisation is needed
+
+Each per-species table of §12 says only whether a segment is inverted *relative
+to GRCh38*. That is a pairwise statement with no direction: "inverted in
+gorilla" could equally be an inversion on the gorilla lineage or on the human
+lineage. Assigning the event to a branch needs the whole pattern across species,
+plus the tree.
+
+### 13.2 Loci and states
+
+Loci are the union-merge of all per-species calls. A species scores as inverted
+at a locus when its call and the locus reciprocally overlap by at least
+`--min-overlap` (0.5). A species whose syntenic backbone covers less than
+`--min-backbone` (0.5) of the locus is scored **missing (`?`)**, not
+not-inverted: absence of alignment is not evidence of shared orientation.
+GRCh38 is state 0 by definition, being the reference every call was made against.
+
+### 13.3 Parsimony
+
+Fitch's algorithm on the alignment's own guide tree, siamang as outgroup:
+
+```
+(((Sumatran_orangutan, Bornean_orangutan),
+  (gorilla, ((bonobo, chimpanzee), (human_CHM13, human_GRCh38)))),
+ siamang);
+```
+
+The down-pass takes intersections of child state sets, taking the union and
+counting a change where the intersection is empty; the up-pass fixes states and
+records the branches carrying a change. Branch assignments were unit-tested
+against known patterns: inverted in every ape → `Homo`; chimpanzee + bonobo →
+`Pan`; both orangutans → `Pongo`; CHM13 only → `human_CHM13`; a non-clade such
+as chimpanzee + gorilla → 2 changes, correctly reported as homoplasy.
+
+`n_changes` doubles as a quality signal. A real inversion is normally one event
+on one branch; incoherent patterns from alignment artefacts need several
+independent changes. 160 of 186 loci (86%) resolve to a single branch.
+
+### 13.4 Result
+
+Loci are built and polarised separately per category, so a pericentric event
+cannot swallow the small inversions inside it. 356 loci: 323 small, of
+which 303 (94%) resolve to a single branch, and 33 pericentric.
+
+Small inversions by branch:
+
+| branch | loci | total | median |
+|---|---|---|---|
+| `gorilla` | 75 | 4,473 kb | 7.5 kb |
+| `Pongo` | 50 | 1,493 kb | 7.3 kb |
+| `Bornean_orangutan` | 37 | 1,096 kb | 5.6 kb |
+| `bonobo` | 32 | 514 kb | 5.0 kb |
+| `chimpanzee` | 31 | 1,372 kb | 4.5 kb |
+| `Sumatran_orangutan` | 27 | 2,536 kb | 9.8 kb |
+| `siamang` | 22 | 211 kb | 6.0 kb |
+| `Pan` | 17 | 161 kb | 5.8 kb |
+| `human_CHM13` | 6 | 192 kb | 6.3 kb |
+| `African_apes` | 3 | 36 kb | 12.0 kb |
+| `Homo` | 2 | 17 kb | 8.4 kb |
+| `Homininae` | 1 | 142 kb | 141.9 kb |
+
+Terminal branches dominate, and internal-branch assignments are now rare
+(6 of 303) as they should be: with GRCh38 fixed at state 0 they arise mostly
+from partial missingness. 230 of the 323 small loci have no missing species
+at all.
+
+
+### 13.5 Validation
+
+**8p23.1 is assigned to the `human_GRCh38` branch** (chr8:7,064,948-12,715,269,
+one parsimony change). All six apes *and* T2T-CHM13 share one orientation and
+only GRCh38 differs — independently recovering the known fact that GRCh38 carries
+the minor allele of this inversion polymorphism. It is also the same locus §11.6
+found by an unrelated route, the UCSC liftOver chains.
+
+**The chr5 and chr4 pericentric inversions are assigned to `Pan`**, i.e. shared
+by chimpanzee and bonobo and absent from human — the correct polarity for
+inversions that arose after the human-*Pan* split. The chr12 and chr17
+pericentric regions come out homoplastic (2 changes) rather than cleanly placed.
+
+### 13.6 Caveats
+
+**Deep inversions shared by human and apes are invisible.** Every call is made
+against GRCh38, which is therefore state 0 everywhere. An inversion that
+occurred on a deep branch and is shared by human and other apes leaves every
+species in state 0 and is never seen. Detecting those requires a non-human
+reference; the all-to-all chains support it, but it is not done here.
+
+**Internal-branch assignments are weak.** `Homininae`, `African_apes` and `Homo`
+assignments generally arise when part of the clade is missing rather than from
+positive evidence. Filter on `n_missing` before trusting them; 117 of 186 loci
+have no missing species at all.
+
+**Backbone coverage was a bug before it was a column.** `min_backbone_cov` is
+computed over *merged* backbone intervals. Backbone chains nest, so after
+sorting by start their end coordinates are not monotonic and a binary search
+over them silently returns nonsense; the first implementation had this, scoring
+almost every species missing and pushing assignments onto internal branches. The
+merge is now explicit and unit-tested.
+
+**Large loci merge distinct events.** The union-merge can join neighbouring
+inversions into one locus, which is a likely source of the homoplastic calls on
+chr12 and chr17.

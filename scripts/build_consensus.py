@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Cluster pooled peak summits into the consensus CTCF site table (METHODS.md §4-5)."""
+"""Cluster pooled peak summits into the consensus CTCF site table (README.md §4-5)."""
 import argparse
 import pandas as pd
 import ctcf_lib as L

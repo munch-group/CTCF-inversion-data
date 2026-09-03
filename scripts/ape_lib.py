@@ -2,7 +2,7 @@
 
 The alignment is the 8-way Cactus alignment of T2T ape assemblies published at
 https://cgl.gi.ucsc.edu/data/cactus/t2t-apes/8-t2t-apes-2023v2/, exported to
-all-to-all chains with `cactus-hal2chains`. See METHODS.md §12.
+all-to-all chains with `cactus-hal2chains`. See README.md §12.
 """
 
 from __future__ import annotations

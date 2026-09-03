@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Consistency checks on the derived CHM13 coordinates (METHODS.md §11.5-11.6).
+"""Consistency checks on the derived CHM13 coordinates (README.md §11.5-11.6).
 
 The decisive check is monotonicity within a chain: sites ordered by hg38
 position must lift in ascending order on a plus chain and descending on a minus

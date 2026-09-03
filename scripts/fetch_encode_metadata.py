@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Download the ENCODE batch-metadata table for CTCF narrowPeak files on GRCh38.
 
-One row per file; the columns used downstream are documented in METHODS.md §2.1.
+One row per file; the columns used downstream are documented in README.md §2.1.
 """
 import argparse
 import ctcf_lib as L

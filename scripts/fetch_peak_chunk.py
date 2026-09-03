@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Download and parse one chunk of the ENCODE peak files (METHODS.md §3).
+"""Download and parse one chunk of the ENCODE peak files (README.md §3).
 
 The manifest is split by row index modulo --chunks so the chunk count is fixed
 at workflow-definition time; experiment and biosample indices are derived from

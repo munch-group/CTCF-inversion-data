@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Check the awk reimplementation reproduces the Python consensus (METHODS.md §7)."""
+"""Check the awk reimplementation reproduces the Python consensus (README.md §7)."""
 import argparse
 import sys
 

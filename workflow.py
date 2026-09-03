@@ -13,7 +13,7 @@ in hg38, with T2T-CHM13v2.0 coordinates added by liftover.
 Every released human CTCF TF ChIP-seq experiment on GRCh38 is pulled from the
 ENCODE portal, one IDR-thresholded peak file per experiment is selected, the
 peak summits are pooled and clustered into consensus sites, and the result is
-checked against independent sequence evidence. See `METHODS.md` for the full
+checked against independent sequence evidence. See `README.md` for the full
 specification — the section numbers referenced in the templates below point
 into it.
 
@@ -134,7 +134,7 @@ the target stays incomplete rather than silently passing.
 # %%
 def fetch_encode_metadata():
     """
-    Downloads the ENCODE batch-metadata table for CTCF narrowPeak files (METHODS §2.1).
+    Downloads the ENCODE batch-metadata table for CTCF narrowPeak files (README §2.1).
     """
     output_dir = f'{STEPS}/encode'
     metadata_path = f'{output_dir}/encode_ctcf_metadata.tsv'
@@ -154,7 +154,7 @@ def fetch_encode_metadata():
 
 def select_encode_files(metadata_path):
     """
-    Picks one peak file per experiment and writes the provenance manifest (METHODS §2.2-2.3).
+    Picks one peak file per experiment and writes the provenance manifest (README §2.2-2.3).
     """
     manifest_path = f'{RESULTS}/ctcf_encode_files.tsv'
 
@@ -195,7 +195,7 @@ def fetch_reference(what):
 
 def fetch_peak_chunk(manifest_path, chunk, n_chunks):
     """
-    Downloads and parses one chunk of the ENCODE peak files into summit arrays (METHODS §3).
+    Downloads and parses one chunk of the ENCODE peak files into summit arrays (README §3).
     """
     output_dir = f'{STEPS}/peaks'
     chunk_path = f'{output_dir}/chunk_{chunk:02d}.npz'
@@ -224,7 +224,7 @@ def fetch_peak_chunk(manifest_path, chunk, n_chunks):
 # %%
 def build_consensus(manifest_path, chunk_paths):
     """
-    Clusters the pooled summits into the consensus CTCF site table (METHODS §4-5).
+    Clusters the pooled summits into the consensus CTCF site table (README §4-5).
     """
     output_dir = f'{STEPS}/consensus'
     sites_path = f'{output_dir}/ctcf_sites_hg38.tsv.gz'
@@ -245,7 +245,7 @@ def build_consensus(manifest_path, chunk_paths):
 
 def liftover_chm13(sites_path, chain_path):
     """
-    Appends T2T-CHM13v2.0 coordinates, keeping the alignment strand (METHODS §11).
+    Appends T2T-CHM13v2.0 coordinates, keeping the alignment strand (README §11).
     """
     output_dir = f'{STEPS}/consensus'
     dual_path = f'{output_dir}/ctcf_sites_hg38_chm13.tsv.gz'
@@ -330,7 +330,7 @@ def fetch_chromalias():
 
 def fetch_ape_chains(query, ref='hg38'):
     """
-    Streams one all-to-all chain file, keeping only the chain header lines (METHODS §12).
+    Streams one all-to-all chain file, keeping only the chain header lines (README §12).
     """
     output_dir = f'{STEPS}/apes'
     headers_path = f'{output_dir}/{ref}_vs_{query}.headers.txt'
@@ -352,7 +352,7 @@ def fetch_ape_chains(query, ref='hg38'):
 def call_inversions(headers_path, alias_path, query, ref='hg38', min_len=1_000):
     """
     Calls inversions against the dominant orientation of each orthologous pair,
-    keeping only those colinear with the surrounding synteny (METHODS §12.2).
+    keeping only those colinear with the surrounding synteny (README §12.2).
     """
     output_dir = f'{STEPS}/apes'
     species = A.SPECIES.get(query, query)
@@ -377,7 +377,7 @@ def call_inversions(headers_path, alias_path, query, ref='hg38', min_len=1_000):
 
 def polarize_inversions(inv_paths, backbone_paths):
     """
-    Places each inversion locus on a branch of the ape tree by Fitch parsimony (METHODS §13).
+    Places each inversion locus on a branch of the ape tree by Fitch parsimony (README §13).
     """
     out_path = f'{RESULTS}/ape_inversions_polarized.tsv'
 
@@ -434,7 +434,7 @@ orientation.
 # %%
 def validate_motif(sites_path, chr21_path, pfm_path):
     """
-    Scans the JASPAR CTCF motif around chr21 summits against shuffled controls (METHODS §9).
+    Scans the JASPAR CTCF motif around chr21 summits against shuffled controls (README §9).
     """
     output_dir = f'{RESULTS}/validation'
     report_path = f'{output_dir}/motif_enrichment.txt'
@@ -455,7 +455,7 @@ def validate_motif(sites_path, chr21_path, pfm_path):
 
 def validate_liftover(dual_path, chain_path, sizes_path):
     """
-    Checks the CHM13 coordinates and reports reference orientation flips (METHODS §11.5-11.6).
+    Checks the CHM13 coordinates and reports reference orientation flips (README §11.5-11.6).
     """
     output_dir = f'{RESULTS}/validation'
     report_path = f'{output_dir}/liftover_checks.txt'
@@ -476,7 +476,7 @@ def validate_liftover(dual_path, chain_path, sizes_path):
 
 def validate_consensus(manifest_path, chunk_paths, sites_path, chrom='chr21'):
     """
-    Re-derives one chromosome with merge_sites.awk and diffs it against the table (METHODS §7).
+    Re-derives one chromosome with merge_sites.awk and diffs it against the table (README §7).
     """
     work_dir = f'{STEPS}/validation'
     output_dir = f'{RESULTS}/validation'

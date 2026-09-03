@@ -2,7 +2,7 @@
 
 Steps invoked by the GWF workflow in `../workflow.py`. Each is a standalone CLI
 (`--help` works); `ctcf_lib.py` holds the shared logic and is imported, not run.
-The specification they implement is `../METHODS.md` — the section numbers in the
+The specification they implement is `../README.md` — the section numbers in the
 docstrings point there.
 
 | script | stage |

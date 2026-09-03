@@ -1,5 +1,5 @@
 # One-pass consensus builder -- a dependency-free reimplementation of the
-# clustering and annotation steps (METHODS.md §4-5, §7).
+# clustering and annotation steps (README.md §4-5, §7).
 #
 # Input : summit BED sorted with `LC_ALL=C sort -k1,1 -k2,2n`, tab-separated:
 #         chrom, summit, summit+1, experiment, biosample, signalValue, -log10(q)

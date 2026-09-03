@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Independent check that the sites are real CTCF sites in hg38 (METHODS.md §9).
+"""Independent check that the sites are real CTCF sites in hg38 (README.md §9).
 
 Scans the JASPAR CTCF motif MA0139.1 around every site summit on chr21 and
 compares the hit rate against random chr21 positions and against the same

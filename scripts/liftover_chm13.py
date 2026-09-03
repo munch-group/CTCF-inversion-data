@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Append T2T-CHM13v2.0 coordinates to the hg38 site table (METHODS.md §11).
+"""Append T2T-CHM13v2.0 coordinates to the hg38 site table (README.md §11).
 
 ENCODE has no CTCF ChIP-seq on CHM13, so CHM13 coordinates are derived by
 lifting the native GRCh38 coordinates through the UCSC hg38->hs1 chains. Unlike

@@ -1,7 +1,7 @@
 """Shared helpers for the ENCODE CTCF site pipeline.
 
 Imported by the scripts in this folder; not meant to be run directly. See
-METHODS.md for the specification these functions implement.
+README.md for the specification these functions implement.
 """
 
 from __future__ import annotations

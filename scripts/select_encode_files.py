@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Pick one peak file per ENCODE experiment (METHODS.md §2.2-2.3).
+"""Pick one peak file per ENCODE experiment (README.md §2.2-2.3).
 
 Newest released analysis, best IDR output type, largest file as tie-break;
 experiments whose selected file carries a read-depth ERROR audit are dropped

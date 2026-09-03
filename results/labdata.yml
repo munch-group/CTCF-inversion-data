@@ -1,4 +1,6 @@
 files:
-  ctcf_encode_files.tsv: blah
-  ctcf_sites_hg38_chm13.parquet: blah
-  ctcf_sites_hg38.parquet: blah
+  ape_inversions_polarized.tsv: Inversion loci placed on ape tree branches
+  ape_inversions.tsv: Inversions vs 6 T2T apes, GRCh38 coords
+  ctcf_encode_files.tsv: 435 source ENCODE peak files, with md5s
+  ctcf_sites_hg38_chm13.parquet: CTCF sites, hg38 plus lifted CHM13 coords
+  ctcf_sites_hg38.parquet: 337,104 consensus CTCF sites, hg38

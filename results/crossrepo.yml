@@ -4,3 +4,4 @@ files:
   ctcf_encode_files.tsv: 435 source ENCODE peak files, with md5s
   ctcf_sites_hg38_chm13.parquet: CTCF sites, hg38 plus lifted CHM13 coords
   ctcf_sites_hg38.parquet: 337,104 consensus CTCF sites, hg38
+  jaspar_MA0139.1_hg38.tsv.gz: JASPAR CTCF sites with strand

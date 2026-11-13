@@ -48,6 +48,12 @@ sites["chm13_start"] = out_start
 sites["chm13_end"] = out_end
 sites["chm13_summit"] = np.where(mapped, s_pos, -1)
 sites["chm13_strand"] = np.where(mapped, np.where(s_strand < 0, "-", "+"), "")
+if "motif_strand" in sites:
+    # the motif orientation read in CHM13 coordinates: flipped where the two
+    # references carry the segment in opposite orientations (README §11.6)
+    ms = sites["motif_strand"].astype(str).to_numpy()
+    flipped = np.select([ms == "+", ms == "-"], ["-", "+"], ".")
+    sites["motif_strand_chm13"] = np.where(mapped, np.where(s_strand < 0, flipped, ms), "")
 sites["chm13_status"] = status
 
 n = len(sites)
@@ -55,6 +61,9 @@ print(f"mapped   {mapped.sum():>7,} / {n:,} ({mapped.mean()*100:.2f}%)")
 for st in ("unique", "gapped", "partial", "unmapped"):
     print(f"  {st:<9}{(status == st).sum():>7,}")
 print(f"minus strand (reference orientation flip): {(sites.chm13_strand == '-').sum():,}")
+if "motif_strand_chm13" in sites:
+    print(f"motif orientation flipped in CHM13:        "
+          f"{(mapped & (s_strand < 0) & (sites.motif_strand != '.')).sum():,}")
 print(f"lifted to a different chromosome:          {(mapped & (s_chrom != chrom)).sum():,}")
 
 sites.to_csv(a.out, sep="\t", index=False)

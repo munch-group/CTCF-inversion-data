@@ -7,12 +7,14 @@ docstrings point there.
 
 | script | stage |
 |---|---|
-| `ctcf_lib.py` | shared: ENCODE selection rules, narrowPeak parsing, clustering, chain liftover, motif scoring |
+| `ctcf_lib.py` | shared: ENCODE selection rules, narrowPeak parsing, clustering, chain liftover, motif scanning |
 | `fetch_encode_metadata.py` | retrieval — ENCODE batch-metadata table (§2.1) |
 | `select_encode_files.py` | retrieval — one peak file per experiment → provenance manifest (§2.2–2.3) |
 | `fetch_peak_chunk.py` | retrieval — download and parse one chunk of peak files (§3) |
-| `fetch_reference.py` | retrieval — liftover chains, hg38 chr21, JASPAR MA0139.1, CHM13 chrom sizes |
+| `fetch_reference.py` | retrieval — liftover chains, hg38 chromosomes, JASPAR MA0139.1 matrix and hg38 track, CHM13 chrom sizes |
 | `build_consensus.py` | compilation — cluster pooled summits into consensus sites (§4–5) |
+| `scan_motifs.py` | compilation — scan the CTCF motif over one hg38 chromosome and orient its sites (§9.2) |
+| `annotate_motifs.py` | compilation — merge the per-chromosome motif calls into the site table (§9.2) |
 | `liftover_chm13.py` | compilation — append T2T-CHM13v2.0 coordinates, keeping strand (§11) |
 | `export_parquet.py` | publication — shard a site table into a parquet dataset of sub-40 MB part files (§6.1) |
 | `ape_lib.py` | shared: T2T ape species map, guide-tree order, chain/chromAlias URLs |
@@ -21,7 +23,8 @@ docstrings point there.
 | `call_inversions.py` | compilation — call inversions against the dominant orientation per pair (§12.2) |
 | `polarize_inversions.py` | compilation — place inversion loci on tree branches by Fitch parsimony (§13) |
 | `merge_inversions.py` | compilation — combine the per-species inversion tables (§12.3) |
-| `validate_motif.py` | validation — CTCF motif enrichment on chr21 vs shuffled controls (§9) |
+| `validate_motif.py` | validation — CTCF motif enrichment on chr21 vs shuffled controls (§9.1) |
+| `validate_orientation.py` | validation — motif orientation calls vs JASPAR's own hg38 predictions (§9.3) |
 | `validate_liftover.py` | validation — CHM13 coordinate checks and orientation flips (§11.5–11.6) |
 | `dump_summits.py` + `merge_sites.awk` + `compare_consensus.py` | validation — re-derive one chromosome with an independent awk implementation and diff it (§7) |
 

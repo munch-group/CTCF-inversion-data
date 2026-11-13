@@ -64,9 +64,22 @@ GAP_TOLERANCE = 10  # max |lifted width - hg38 width| still called a clean lift
 CHAIN_URL = (
     "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/liftOver/hg38ToHs1.over.chain.gz"
 )
-CHR21_URL = "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/chromosomes/chr21.fa.gz"
+HG38_CHROM_URL = "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/chromosomes/{chrom}.fa.gz"
+CHR21_URL = HG38_CHROM_URL.format(chrom="chr21")
 JASPAR_URL = "https://jaspar.elixir.no/api/v1/matrix/MA0139.1/?format=json"
 HS1_SIZES_URL = "https://hgdownload.soe.ucsc.edu/goldenPath/hs1/bigZips/hs1.chrom.sizes"
+# JASPAR's own genome-wide MA0139.1 predictions for hg38 (JASPAR 2022 UCSC
+# tracks; later releases carry only the successor matrix MA0139.2)
+JASPAR_TRACK_URL = (
+    "https://expdata.cmmt.ubc.ca/JASPAR/downloads/UCSC_tracks/2022/hg38/MA0139.1.tsv.gz"
+)
+JASPAR_TRACK_COLUMNS = ["chrom", "start", "end", "name", "rel_score_1000",
+                        "pvalue_score", "strand"]
+
+# motif scan (README §9): a window is a hit at or above this JASPAR relative
+# score; the best hit is searched within +/-MOTIF_FLANK of the summit
+MOTIF_REL_CUTOFF = 0.80
+MOTIF_FLANK = 100
 
 
 # --------------------------------------------------------------------------- #
@@ -221,9 +234,13 @@ DTYPES = {
     "frac_experiments": np.float32, "max_signal": np.float32,
     "mean_signal": np.float32, "max_neglog10q": np.float32,
     "n_peaks": np.int32, "width": np.int32,
+    # motif orientation (README §9.2)
+    "motif_rel": np.float32, "motif_strand": "category", "motif_start": np.int32,
+    "n_motifs_plus": np.int16, "n_motifs_minus": np.int16,
     # present only in the dual-coordinate table
     "chm13_chrom": "string", "chm13_start": np.int64, "chm13_end": np.int64,
-    "chm13_summit": np.int64, "chm13_strand": "string", "chm13_status": "category",
+    "chm13_summit": np.int64, "chm13_strand": "string",
+    "motif_strand_chm13": "category", "chm13_status": "category",
 }
 
 
@@ -342,7 +359,7 @@ def lift(chains: list, chrom: np.ndarray, pos: np.ndarray):
 
 
 # --------------------------------------------------------------------------- #
-# CTCF motif scanning (validation)
+# CTCF motif scanning (orientation annotation and validation)
 # --------------------------------------------------------------------------- #
 def load_pwm(pfm_json: dict):
     """JASPAR PFM -> (log-odds, reverse-complement log-odds, min score, max score)."""
@@ -379,3 +396,89 @@ def best_relscore(S, centers, lo, rc, mn, mx, flank: int = 100) -> np.ndarray:
     sc = np.maximum(fwd, rev)
     sc[nmask] = -np.inf
     return (sc.max(1) - mn) / (mx - mn)
+
+
+def scan_pwm(S: np.ndarray, lo, rc, mn, mx, block: int = 1 << 24):
+    """Relative PWM score of the W-mer starting at every position, both strands.
+
+    Returns `(fwd, rev)` float32 arrays of length `len(S) - W + 1`, holding the
+    JASPAR relative score `(score - min) / (max - min)` of the window starting
+    at each position on the plus strand and on the minus strand respectively.
+    Windows containing a non-ACGT base score -1 (real scores lie in [0, 1]).
+    The chromosome is processed in blocks so that the temporaries stay small.
+    """
+    W = lo.shape[1]
+    n = S.size - W + 1
+    lo32, rc32 = lo.astype(np.float32), rc.astype(np.float32)
+    scale = np.float32(mx - mn)
+    fwd = np.empty(n, np.float32)
+    rev = np.empty(n, np.float32)
+    for b0 in range(0, n, block):
+        b1 = min(b0 + block, n)
+        m = b1 - b0
+        seg = S[b0:b1 + W - 1]
+        bad = seg < 0
+        seg = np.where(bad, 0, seg).astype(np.intp)
+        f = np.zeros(m, np.float32)
+        r = np.zeros(m, np.float32)
+        nmask = np.zeros(m, bool)
+        for j in range(W):
+            col = seg[j:j + m]
+            f += lo32[col, j]
+            r += rc32[col, j]
+            nmask |= bad[j:j + m]
+        f = (f - np.float32(mn)) / scale
+        r = (r - np.float32(mn)) / scale
+        f[nmask] = -1
+        r[nmask] = -1
+        fwd[b0:b1] = f
+        rev[b0:b1] = r
+    return fwd, rev
+
+
+def annotate_motifs(sites: pd.DataFrame, fwd: np.ndarray, rev: np.ndarray, width: int,
+                    flank: int = MOTIF_FLANK, cutoff: float = MOTIF_REL_CUTOFF) -> pd.DataFrame:
+    """Per-site motif orientation from the strand score arrays of one chromosome.
+
+    `sites` holds the rows of one chromosome (`start`, `end`, `summit`); `fwd`
+    and `rev` come from `scan_pwm` on that chromosome. The best window on either
+    strand within +/-`flank` of the summit (the same window `best_relscore` uses)
+    gives `motif_rel`; if it reaches `cutoff` the site is oriented by that hit
+    (`motif_strand`, `motif_start`), otherwise `motif_strand` is `.` and
+    `motif_start` is -1. `n_motifs_plus`/`n_motifs_minus` count every window at
+    or above `cutoff` on each strand whose start lies inside the whole site
+    interval, so sites carrying motifs in both orientations can be recognised.
+    """
+    n = fwd.size
+    summit = sites["summit"].to_numpy(np.int64)
+    offs = np.arange(-flank, flank - width + 2)               # window starts
+    idx = summit[:, None] + offs[None, :]
+    valid = (idx >= 0) & (idx < n)
+    idx = np.clip(idx, 0, n - 1)
+    f = np.where(valid, fwd[idx], np.float32(-1))
+    r = np.where(valid, rev[idx], np.float32(-1))
+    best_f, best_r = f.max(1), r.max(1)
+    is_plus = best_f >= best_r
+    rel = np.where(is_plus, best_f, best_r)
+    start = summit + offs[np.where(is_plus, f.argmax(1), r.argmax(1))]
+    hit = rel >= cutoff
+
+    # hits are sparse, so count them per site from their sorted positions
+    hp = np.flatnonzero(fwd >= cutoff)
+    hm = np.flatnonzero(rev >= cutoff)
+    a = sites["start"].to_numpy(np.int64)
+    b = np.maximum(a, sites["end"].to_numpy(np.int64) - width + 1)   # exclusive
+
+    return pd.DataFrame({
+        "motif_rel": rel.astype(np.float32),
+        "motif_strand": np.where(hit, np.where(is_plus, "+", "-"), "."),
+        "motif_start": np.where(hit, start, -1).astype(np.int32),
+        "n_motifs_plus": (np.searchsorted(hp, b) - np.searchsorted(hp, a)).astype(np.int16),
+        "n_motifs_minus": (np.searchsorted(hm, b) - np.searchsorted(hm, a)).astype(np.int16),
+    }, index=sites.index)
+
+
+def read_fasta_gz(path: str) -> str:
+    """Sequence of a single-record gzipped FASTA, as one string."""
+    with gzip.open(path, "rt") as fh:
+        return "".join(l.strip() for l in fh if not l.startswith(">"))

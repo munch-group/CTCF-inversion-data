@@ -22,13 +22,20 @@ flowchart TD
     A[fetch_encode_metadata<br/><i>steps/encode</i>] --> B[select_encode_files<br/><b>results/ctcf_encode_files.tsv</b>]
     B --> C[fetch_peaks_0 .. fetch_peaks_15<br/><i>steps/peaks</i>]
     C --> D[build_consensus<br/><i>steps/consensus</i>]
+    R5[fetch_reference chr1 .. chrY] --> M[scan_motifs_chr1 .. scan_motifs_chrY<br/><i>steps/motifs</i>]
+    R3[fetch_reference jaspar] --> M
+    D --> M
+    M --> AN[annotate_motifs<br/><i>steps/consensus</i>]
+    D --> AN
     R1[fetch_reference chain] --> E
-    D --> E[liftover_chm13<br/><i>steps/consensus</i>]
-    D --> P1[export_sites_parquet<br/><b>results/ctcf_sites_hg38/</b>]
+    AN --> E[liftover_chm13<br/><i>steps/consensus</i>]
+    AN --> P1[export_sites_parquet<br/><b>results/ctcf_sites_hg38/</b>]
     E --> P2[export_sites_chm13_parquet<br/><b>results/ctcf_sites_hg38_chm13/</b>]
     D --> V1[validate_motif]
-    R2[fetch_reference chr21] --> V1
-    R3[fetch_reference jaspar] --> V1
+    R5 --> V1
+    R3 --> V1
+    J[fetch_jaspar_track<br/><b>results/jaspar_MA0139.1_hg38.tsv.gz</b>] --> V4[validate_orientation]
+    AN --> V4
     E --> V2[validate_liftover]
     R4[fetch_reference hs1_sizes] --> V2
     R1 --> V2
@@ -39,6 +46,7 @@ flowchart TD
     V1 --> N[notebooks]
     V2 --> N
     V3 --> N
+    V4 --> N
 ```
 
 Files under `steps/` are intermediates and are git-ignored; everything worth
@@ -61,6 +69,7 @@ from pathlib import Path
 
 sys.path.insert(0, 'scripts')
 import ape_lib as A
+import ctcf_lib as L
 
 from gwf import AnonymousTarget, Workflow
 from gwf.workflow import collect
@@ -173,11 +182,12 @@ def select_encode_files(metadata_path):
 
 def fetch_reference(what):
     """
-    Downloads one external reference file (liftover chains, chr21, JASPAR motif, CHM13 sizes).
+    Downloads one external reference file (liftover chains, hg38 chromosomes, JASPAR motif, CHM13 sizes).
     """
     output_dir = f'{STEPS}/refs'
-    suffix = {'chain': 'hg38ToHs1.over.chain.gz', 'chr21': 'hg38_chr21.fa.gz',
-              'jaspar': 'MA0139.1.json', 'hs1_sizes': 'hs1.chrom.sizes'}[what]
+    suffix = {'chain': 'hg38ToHs1.over.chain.gz', 'jaspar': 'MA0139.1.json',
+              'hs1_sizes': 'hs1.chrom.sizes',
+              **{c: f'hg38_{c}.fa.gz' for c in L.CHROMS}}[what]
     ref_path = f'{output_dir}/{suffix}'
 
     inputs = []
@@ -189,6 +199,25 @@ def fetch_reference(what):
     mkdir -p {output_dir} {TMP}
     pixi run python scripts/fetch_reference.py --what {what} --out {tmp} &&
         mv {tmp} {ref_path}
+    """
+    return AnonymousTarget(inputs=inputs, outputs=outputs, options=options, spec=spec)
+
+
+def fetch_jaspar_track():
+    """
+    Downloads JASPAR's own genome-wide MA0139.1 predictions for hg38 (stranded BED-like TSV, README §9.3).
+    """
+    track_path = f'{RESULTS}/jaspar_MA0139.1_hg38.tsv.gz'
+
+    inputs = []
+    outputs = {'track_path': track_path}
+    options = {'memory': '2g', 'walltime': '01:00:00'}
+
+    tmp = tmp_path(track_path)
+    spec = f"""
+    mkdir -p {RESULTS} {TMP}
+    pixi run python scripts/fetch_reference.py --what jaspar_track --out {tmp} &&
+        mv {tmp} {track_path}
     """
     return AnonymousTarget(inputs=inputs, outputs=outputs, options=options, spec=spec)
 
@@ -227,7 +256,7 @@ def build_consensus(manifest_path, chunk_paths):
     Clusters the pooled summits into the consensus CTCF site table (README §4-5).
     """
     output_dir = f'{STEPS}/consensus'
-    sites_path = f'{output_dir}/ctcf_sites_hg38.tsv.gz'
+    sites_path = f'{output_dir}/ctcf_consensus_hg38.tsv.gz'
 
     inputs = [manifest_path] + list(chunk_paths)
     outputs = {'sites_path': sites_path}
@@ -238,6 +267,48 @@ def build_consensus(manifest_path, chunk_paths):
     mkdir -p {output_dir} {TMP}
     pixi run python scripts/build_consensus.py \\
         --manifest {manifest_path} --chunks {' '.join(chunk_paths)} --out {tmp} &&
+        mv {tmp} {sites_path}
+    """
+    return AnonymousTarget(inputs=inputs, outputs=outputs, options=options, spec=spec)
+
+
+def scan_motifs(sites_path, fasta_path, pfm_path, chrom):
+    """
+    Scans the CTCF motif over one hg38 chromosome and orients the sites on it (README §9.2).
+    """
+    output_dir = f'{STEPS}/motifs'
+    scan_path = f'{output_dir}/{chrom}.tsv.gz'
+
+    inputs = [sites_path, fasta_path, pfm_path, 'scripts/scan_motifs.py']
+    outputs = {'scan_path': scan_path}
+    options = {'memory': '12g', 'walltime': '01:00:00'}
+
+    tmp = tmp_path(scan_path)
+    spec = f"""
+    mkdir -p {output_dir} {TMP}
+    pixi run python scripts/scan_motifs.py \\
+        --sites {sites_path} --fasta {fasta_path} --pfm {pfm_path} --chrom {chrom} --out {tmp} &&
+        mv {tmp} {scan_path}
+    """
+    return AnonymousTarget(inputs=inputs, outputs=outputs, options=options, spec=spec)
+
+
+def annotate_motifs(consensus_path, scan_paths):
+    """
+    Appends the motif orientation columns to the consensus table, giving the hg38 site table (README §9.2).
+    """
+    output_dir = f'{STEPS}/consensus'
+    sites_path = f'{output_dir}/ctcf_sites_hg38.tsv.gz'
+
+    inputs = [consensus_path] + list(scan_paths) + ['scripts/annotate_motifs.py']
+    outputs = {'sites_path': sites_path}
+    options = {'memory': '8g', 'walltime': '00:30:00'}
+
+    tmp = tmp_path(sites_path)
+    spec = f"""
+    mkdir -p {output_dir} {TMP}
+    pixi run python scripts/annotate_motifs.py \\
+        --sites {consensus_path} --scans {' '.join(scan_paths)} --out {tmp} &&
         mv {tmp} {sites_path}
     """
     return AnonymousTarget(inputs=inputs, outputs=outputs, options=options, spec=spec)
@@ -421,13 +492,14 @@ def merge_inversions(inv_paths):
 """
 ### Validation
 
-Three independent checks. `validate_motif` is the strongest: it uses sequence
+Four independent checks. `validate_motif` is the strongest: it uses sequence
 evidence that never entered the compilation, so it confirms both the assembly
-and the biological identity of the sites. `validate_consensus` re-derives one
-chromosome with a dependency-free awk implementation of the same specification
-and diffs it against the Python result. `validate_liftover` checks the derived
-CHM13 coordinates and reports the loci where the two references disagree on
-orientation.
+and the biological identity of the sites. `validate_orientation` compares the
+motif orientation calls with JASPAR's independently computed hg38 predictions.
+`validate_consensus` re-derives one chromosome with a dependency-free awk
+implementation of the same specification and diffs it against the Python
+result. `validate_liftover` checks the derived CHM13 coordinates and reports
+the loci where the two references disagree on orientation.
 """
 
 
@@ -448,6 +520,27 @@ def validate_motif(sites_path, chr21_path, pfm_path):
     mkdir -p {output_dir} {TMP}
     pixi run python scripts/validate_motif.py \\
         --sites {sites_path} --chr21 {chr21_path} --pfm {pfm_path} --out {tmp} &&
+        mv {tmp} {report_path}
+    """
+    return AnonymousTarget(inputs=inputs, outputs=outputs, options=options, spec=spec)
+
+
+def validate_orientation(sites_path, track_path):
+    """
+    Checks the motif orientation calls against JASPAR's own hg38 predictions (README §9.3).
+    """
+    output_dir = f'{RESULTS}/validation'
+    report_path = f'{output_dir}/motif_orientation.txt'
+
+    inputs = [sites_path, track_path, 'scripts/validate_orientation.py']
+    outputs = {'report_path': report_path}
+    options = {'memory': '8g', 'walltime': '00:30:00'}
+
+    tmp = tmp_path(report_path)
+    spec = f"""
+    mkdir -p {output_dir} {TMP}
+    pixi run python scripts/validate_orientation.py \\
+        --sites {sites_path} --track {track_path} --out {tmp} &&
         mv {tmp} {report_path}
     """
     return AnonymousTarget(inputs=inputs, outputs=outputs, options=options, spec=spec)
@@ -549,14 +642,20 @@ manifest_target = gwf.target_from_template(
 
 manifest_path = manifest_target.outputs['manifest_path']
 
-# external reference files, one target each
+# external reference files, one target each; the 24 hg38 chromosomes feed the
+# motif scan, chr21 doubles as the sequence for the motif validation
+REFERENCES = ['chain', 'jaspar', 'hs1_sizes'] + L.CHROMS
 reference_targets = gwf.map(
     fetch_reference,
-    [{'what': w} for w in ['chain', 'chr21', 'jaspar', 'hs1_sizes']],
+    [{'what': w} for w in REFERENCES],
     name=lambda idx, target: f'fetch_reference_{target.spec.split("--what ")[1].split()[0]}',
 )
-chain_path, chr21_path, pfm_path, sizes_path = [
-    o['ref_path'] for o in reference_targets.outputs]
+ref_paths = dict(zip(REFERENCES, [o['ref_path'] for o in reference_targets.outputs]))
+chain_path, pfm_path, sizes_path = ref_paths['chain'], ref_paths['jaspar'], ref_paths['hs1_sizes']
+chr21_path = ref_paths['chr21']
+
+jaspar_track_target = gwf.target_from_template('fetch_jaspar_track', fetch_jaspar_track())
+track_path = jaspar_track_target.outputs['track_path']
 
 # the peak files, split over a fixed number of parallel tasks
 peak_targets = gwf.map(
@@ -569,8 +668,21 @@ chunk_paths = collect(peak_targets.outputs, ['chunk_path'])['chunk_paths']
 
 # --- compilation ----------------------------------------------------------- #
 
-sites_target = gwf.target_from_template(
+consensus_target = gwf.target_from_template(
     'build_consensus', build_consensus(manifest_path, chunk_paths))
+consensus_path = consensus_target.outputs['sites_path']
+
+# motif orientation: one scan per chromosome, then merged into the site table
+scan_targets = gwf.map(
+    scan_motifs,
+    [{'fasta_path': ref_paths[c], 'chrom': c} for c in L.CHROMS],
+    extra=dict(sites_path=consensus_path, pfm_path=pfm_path),
+    name=lambda idx, t: f'scan_motifs_{L.CHROMS[idx]}',
+)
+scan_paths = collect(scan_targets.outputs, ['scan_path'])['scan_paths']
+
+sites_target = gwf.target_from_template(
+    'annotate_motifs', annotate_motifs(consensus_path, scan_paths))
 sites_path = sites_target.outputs['sites_path']
 
 liftover_target = gwf.target_from_template(
@@ -618,13 +730,16 @@ gwf.target_from_template(
 # --- validation ------------------------------------------------------------ #
 
 gwf.target_from_template(
-    'validate_motif', validate_motif(sites_path, chr21_path, pfm_path))
+    'validate_motif', validate_motif(consensus_path, chr21_path, pfm_path))
+
+gwf.target_from_template(
+    'validate_orientation', validate_orientation(sites_path, track_path))
 
 gwf.target_from_template(
     'validate_liftover', validate_liftover(dual_path, chain_path, sizes_path))
 
 gwf.target_from_template(
-    'validate_consensus', validate_consensus(manifest_path, chunk_paths, sites_path))
+    'validate_consensus', validate_consensus(manifest_path, chunk_paths, consensus_path))
 
 # --- documentation --------------------------------------------------------- #
 

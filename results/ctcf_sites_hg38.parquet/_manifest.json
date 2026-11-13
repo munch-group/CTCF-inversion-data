@@ -13,13 +13,18 @@
     "mean_signal": "float32",
     "max_neglog10q": "float32",
     "n_peaks": "int32",
-    "width": "int32"
+    "width": "int32",
+    "motif_rel": "float32",
+    "motif_strand": "category",
+    "motif_start": "int32",
+    "n_motifs_plus": "int16",
+    "n_motifs_minus": "int16"
   },
   "files": [
     {
       "path": "part-00000.parquet",
       "partition": {},
-      "size": 11740917,
+      "size": 14561603,
       "num_rows": 337104
     }
   ]

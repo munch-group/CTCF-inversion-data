@@ -14,18 +14,24 @@
     "max_neglog10q": "float32",
     "n_peaks": "int32",
     "width": "int32",
+    "motif_rel": "float32",
+    "motif_strand": "category",
+    "motif_start": "int32",
+    "n_motifs_plus": "int16",
+    "n_motifs_minus": "int16",
     "chm13_chrom": "string",
     "chm13_start": "int64",
     "chm13_end": "int64",
     "chm13_summit": "int64",
     "chm13_strand": "string",
+    "motif_strand_chm13": "category",
     "chm13_status": "category"
   },
   "files": [
     {
       "path": "part-00000.parquet",
       "partition": {},
-      "size": 17453997,
+      "size": 20341960,
       "num_rows": 337104
     }
   ]

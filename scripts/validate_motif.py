@@ -9,7 +9,6 @@ the assembly and the biological identity of the sites. Wrong-assembly
 coordinates would sit at the background rate throughout.
 """
 import argparse
-import gzip
 import json
 import sys
 
@@ -17,8 +16,8 @@ import numpy as np
 import pandas as pd
 import ctcf_lib as L
 
-REL_CUTOFF = 0.80
-FLANK = 100
+REL_CUTOFF = L.MOTIF_REL_CUTOFF
+FLANK = L.MOTIF_FLANK
 
 ap = argparse.ArgumentParser(description=__doc__)
 ap.add_argument("--sites", required=True)
@@ -27,9 +26,7 @@ ap.add_argument("--pfm", required=True, help="JASPAR MA0139.1 JSON")
 ap.add_argument("--out", required=True)
 a = ap.parse_args()
 
-with gzip.open(a.chr21, "rt") as fh:
-    seq = "".join(l.strip() for l in fh if not l.startswith(">"))
-S = L.encode_sequence(seq)
+S = L.encode_sequence(L.read_fasta_gz(a.chr21))
 lo, rc, mn, mx = L.load_pwm(json.load(open(a.pfm))["pfm"])
 score = lambda c: L.best_relscore(S, c, lo, rc, mn, mx, FLANK)
 

@@ -21,12 +21,13 @@ scripts in `scripts/`. Section numbers referenced from the code point here.
 |---|---|
 | `workflow.py` | the GWF workflow: retrieval, compilation, validation |
 | `scripts/` | the steps the workflow invokes (see `scripts/README.md`) |
-| `results/ctcf_sites_hg38.parquet/` | **the dataset**: 337,104 CTCF sites, parquet (§6.1) |
+| `results/ctcf_sites_hg38.parquet/` | **the dataset**: 337,104 CTCF sites with motif orientation, parquet (§6.1) |
 | `results/ctcf_sites_hg38_chm13.parquet/` | the same sites with CHM13 coordinates added, parquet (§11) |
 | `results/ctcf_encode_files.tsv` | provenance manifest: the 435 ENCODE files used, with md5sums (§6.2) |
 | `results/ape_inversions.tsv` | inversions between the T2T ape assemblies (§12) |
 | `results/ape_inversions_polarized.tsv` | those loci placed on branches of the ape tree (§13) |
-| `results/validation/` | the three validation reports (§7, §9, §11.5) |
+| `results/jaspar_MA0139.1_hg38.tsv.gz` | JASPAR's own genome-wide MA0139.1 predictions for hg38, as downloaded (§9.3) |
+| `results/validation/` | the four validation reports (§7, §9.1, §9.3, §11.5) |
 | `steps/` | intermediates — metadata, peak chunks, reference files, the TSV site tables (git-ignored) |
 
 Run the whole thing with:
@@ -50,7 +51,7 @@ and handles both the hg38-only and the dual-coordinate table.
 
 ### 0.1 The workflow
 
-`workflow.py` defines 47 GWF targets. Dependencies are resolved from the file
+`workflow.py` defines 97 GWF targets. Dependencies are resolved from the file
 paths each target declares, so the graph below is derived from those, not
 maintained by hand.
 
@@ -58,9 +59,12 @@ maintained by hand.
 |---|---|---|---|
 | `fetch_encode_metadata` | 1 | ENCODE batch-metadata table | §2.1 |
 | `select_encode_files` | 1 | one best peak file per experiment | §2.2–2.3 |
-| `fetch_reference_*` | 4 | chains, hg38 chr21, JASPAR MA0139.1, chrom sizes | §9, 11 |
+| `fetch_reference_*` | 27 | chains, the 24 hg38 chromosomes, JASPAR MA0139.1, chrom sizes | §9, 11 |
+| `fetch_jaspar_track` | 1 | JASPAR's genome-wide MA0139.1 predictions for hg38 | §9.3 |
 | `fetch_peaks_*` | 16 | download + parse peak files, 16 chunks | §3 |
 | `build_consensus` | 1 | cluster pooled summits into consensus sites | §4–5 |
+| `scan_motifs_*` | 24 | scan the CTCF motif over one chromosome, orient its sites | §9.2 |
+| `annotate_motifs` | 1 | merge the motif columns into the site table | §9.2 |
 | `liftover_chm13` | 1 | append T2T-CHM13 coordinates, keeping strand | §11 |
 | `export_sites_parquet, export_sites_chm13_parquet` | 2 | shard to parquet datasets | §6.1 |
 | `fetch_chromalias` | 1 | GenBank accession → chromosome names | §12.1 |
@@ -68,7 +72,7 @@ maintained by hand.
 | `call_inversions_*` | 7 | call small + pericentric inversions, 7 pairs | §12.2 |
 | `merge_inversions` | 1 | combine per-species inversion tables | §12.3 |
 | `polarize_inversions` | 1 | place loci on tree branches (Fitch parsimony) | §13 |
-| `validate_motif, validate_liftover, validate_consensus` | 3 | the three checks | §7, 9, 11.5 |
+| `validate_motif, validate_orientation, validate_liftover, validate_consensus` | 4 | the four checks | §7, 9.1, 9.3, 11.5 |
 | `visualization.ipynb` | 1 | execute the notebook against final outputs | §— |
 
 Every target writes to a scratch path under `steps/tmp/` and moves the result
@@ -78,7 +82,7 @@ declared as target *inputs*, so editing one retriggers the targets that use it �
 GWF schedules on file mtimes here and does not otherwise notice that a step's
 code changed.
 
-Intermediates live in `steps/` (git-ignored, ~220 MB); only `results/` is
+Intermediates live in `steps/` (git-ignored, ~1.2 GB, most of it the hg38 sequence); only `results/` is
 committed.
 
 ---
@@ -294,6 +298,16 @@ For each cluster, over the pooled peaks belonging to it:
 | `n_peaks` | number of pooled peaks in the cluster (≥ `n_experiments`) |
 | `width` | `end - start` |
 
+Those twelve columns are computed from the peaks alone. Five more come from the
+hg38 sequence (§9.2):
+
+| column | definition |
+|---|---|
+| `motif_rel` | best JASPAR relative score of the CTCF motif MA0139.1 on either strand, over 19-mers starting within ±100 bp of `summit`; `-1` if every such window contains `N` |
+| `motif_strand` | strand of that best hit if `motif_rel ≥ 0.80`, else `.` |
+| `motif_start` | 0-based hg38 start of that 19-bp hit (`end = motif_start + 19`); `-1` if `motif_strand` is `.` |
+| `n_motifs_plus` / `n_motifs_minus` | number of 19-mers scoring ≥ 0.80 on each strand whose start lies inside `[start, end)` |
+
 Rows are sorted by chromosome (`chr1`…`chr22`, `chrX`, `chrY`) then `start`.
 
 ---
@@ -305,14 +319,16 @@ Rows are sorted by chromosome (`chr1`…`chr22`, `chrX`, `chrY`) then `start`.
 A parquet dataset written by `pd_lfs.write_parquet`: `part-*.parquet` shards each
 below 40 MB — comfortably under GitHub's 50 MB warning — plus a `_manifest.json`
 index that lets `pd_lfs.read_parquet` read the dataset over plain HTTPS without
-directory listing. 337,104 rows, 12 columns in the order listed in §5. Conversion
+directory listing. 337,104 rows, 17 columns in the order listed in §5. Conversion
 is lossless; the column dtypes below are carried in the manifest and restored on
 read. The pipeline also emits the same table as a gzipped TSV at
-`steps/consensus/ctcf_sites_hg38.tsv.gz`, which is what the shell recipe in §7
-reproduces. Coordinates are **0-based half-open (BED convention) on GRCh38/hg38**. Column
-types: `chrom` category; `start`/`end`/`summit`/`n_peaks`/`width` int32;
-`n_experiments`/`n_biosamples` int16; `frac_experiments`/`max_signal`/`mean_signal`/
-`max_neglog10q` float32.
+`steps/consensus/ctcf_sites_hg38.tsv.gz`; its first twelve columns, before the
+motif annotation, are `steps/consensus/ctcf_consensus_hg38.tsv.gz`, which is
+what the shell recipe in §7 reproduces. Coordinates are **0-based half-open (BED
+convention) on GRCh38/hg38**. Column types: `chrom` category; `start`/`end`/
+`summit`/`n_peaks`/`width`/`motif_start` int32; `n_experiments`/`n_biosamples`/
+`n_motifs_plus`/`n_motifs_minus` int16; `frac_experiments`/`max_signal`/
+`mean_signal`/`max_neglog10q`/`motif_rel` float32; `motif_strand` category.
 
 To load as a pandas DataFrame:
 
@@ -346,7 +362,9 @@ used byte-identical inputs.
 Requires only `curl`, `gzip`, `sort` and `awk`. This recipe was executed on chr21 and
 produces output **identical** to the shipped file: 4,407/4,407 sites with zero
 mismatches in `start`, `end`, `summit`, `n_experiments`, `n_biosamples` and `n_peaks`,
-and agreement to float32 precision (≤ 1.3e-4) on the signal columns.
+and agreement to float32 precision (≤ 1.3e-4) on the signal columns. It reproduces
+the twelve peak-derived columns of §5; the motif columns need the hg38 sequence
+(§9.2).
 
 Set `LC_ALL=C` throughout: a locale with comma decimal separators corrupts `awk`'s
 numeric output, and locale collation changes `sort` order.
@@ -442,7 +460,9 @@ Any faithful rebuild from the same ENCODE snapshot must reproduce these exactly.
 
 ---
 
-## 9. Validation
+## 9. Motif validation and orientation
+
+### 9.1 Validation
 
 Independent confirmation that the coordinates are hg38 and that the sites are real
 CTCF sites, using sequence evidence that never entered the compilation.
@@ -477,6 +497,75 @@ shift, confirm both the assembly and the biological identity of the sites. Wrong
 assembly coordinates would sit at the ~7% background rate throughout. The workflow target
 `validate_motif` reruns this end to end on every build.
 
+### 9.2 Motif orientation
+
+CTCF sites are directional. Loops form between sites whose motifs point towards
+each other (the convergent rule of Rao et al. 2014), and an inversion that spans a
+site reverses its motif relative to its neighbours, so the orientation of each
+site is needed to interpret inversions across them. The table therefore carries
+the strand of the CTCF motif at every site, read from the hg38 sequence with the
+scoring of §9.1 applied genome-wide.
+
+**Procedure.** The 24 hg38 chromosome sequences (chr1–22, X, Y) were downloaded
+from `https://hgdownload.soe.ucsc.edu/goldenPath/hg38/chromosomes/` and the
+MA0139.1 PWM of §9.1 was scored at every position on both strands
+(`scripts/scan_motifs.py`, one workflow target per chromosome). For each site,
+the best-scoring 19-mer on either strand whose start lies within ±100 bp of
+`summit` — exactly the window §9.1 scores — gives `motif_rel`. If it reaches the
+§9.1 threshold of 0.80 the site is oriented by it: `motif_strand` is its strand
+and `motif_start` its 0-based hg38 start; otherwise `motif_strand` is `.` and
+`motif_start` is `-1`. Independently of the summit window, `n_motifs_plus` and
+`n_motifs_minus` count every 19-mer scoring ≥ 0.80 on each strand whose start
+lies inside the whole site interval `[start, end)`, so sites that carry motifs
+in both orientations can be recognised. Windows containing `N` never score.
+
+`+` means the matrix as published by JASPAR (consensus `TGGCCACCAGGGGGCGCTA`)
+matches the plus strand of hg38; `-` means its reverse complement does. In this
+convention a convergent pair is a `+` site upstream of a `-` site. Because the
+window, scorer and threshold are those of §9.1, the fraction of oriented sites
+in each recurrence bin is identical to the motif rate reported there.
+
+**Result:**
+
+| | sites |
+|---|---|
+| oriented (`motif_strand` is `+` or `-`) | 140,296 / 337,104 (41.6%) |
+| on the plus strand | 50.1% of oriented sites |
+| oriented, sites in 1 experiment | 19.7% |
+| oriented, sites in 2–9 experiments | 41.0% |
+| oriented, sites in 10–99 experiments | 59.1% |
+| oriented, sites in ≥100 experiments | 87.5% |
+| motifs in both orientations within the site | 22,742 (6.75%) |
+
+### 9.3 Check against JASPAR's genome-wide predictions
+
+JASPAR publishes its own scan of MA0139.1 over hg38 (JASPAR 2022 UCSC tracks,
+computed with PWMScan, keeping hits with relative score ≥ 0.8 and *p* < 0.05):
+770,050 hits, 767,259 of them on chr1–22, X, Y. The workflow target
+`fetch_jaspar_track` downloads it unchanged to `results/jaspar_MA0139.1_hg38.tsv.gz`
+(7.7 MB; columns `chrom`, `start`, `end`, `name`, relative score × 1000,
+*p*-value score scaled 0–1000, `strand`; 0-based half-open). The 2022 release is
+used because later JASPAR releases carry only the successor matrix MA0139.2.
+
+Those predictions never entered the compilation, so agreement in position and
+strand confirms the scan and the strand convention. The workflow target
+`validate_orientation` compares them on every build:
+
+| | |
+|---|---|
+| calls with `motif_rel ≥ 0.82`: same position and strand in JASPAR | 100.0% (n = 106,485) |
+| calls with `0.80 ≤ motif_rel < 0.82`: same position and strand in JASPAR | 34.0% (n = 33,811) |
+| calls with the opposite strand in JASPAR at the same position | 0.0% |
+| JASPAR hits within the summit window of a ≥100-experiment site that lie in an oriented site | 100.0% (n = 44,508) |
+
+Above a margin of 0.02 the two scans agree exactly. The disagreements are
+confined to calls just above the 0.80 cutoff: JASPAR builds its PWM with
+different pseudocounts and scores the same windows about 0.011 lower on average,
+so those hits fall below its own cutoff and are absent from its track. No call
+has the opposite strand in JASPAR. JASPAR hits near recurrent summits that are
+not themselves the call are weaker second motifs inside a site that is already
+oriented by a stronger one.
+
 ---
 
 ## 10. Interpretation and caveats
@@ -503,11 +592,17 @@ partly reflects sampling effort. `n_biosamples` (max 158) is the less biased
 recurrence measure — use it when the question is "how many cell types", and
 `n_experiments` when the question is "how reproducibly called".
 
-**10.4 No motif orientation.** CTCF loop anchors are directional and the convergent-
-motif rule governs loop formation, but this table carries no motif strand. Adding it
-requires a PWM scan of the full hg38 sequence (§9 does exactly this for chr21; scaling
-it genome-wide needs the ~950 MB hg38 FASTA). Sites in long clusters (§4) may contain
-several motifs in different orientations.
+**10.4 Motif orientation is one call per site.** `motif_strand` is the strand of
+the single best motif near the summit (§9.2). 22,742 sites (6.75%) carry
+motifs in both orientations somewhere in the interval (`n_motifs_plus > 0` and
+`n_motifs_minus > 0`), mostly the long clustered sites of §4; for those the
+orientation of the site as a whole is ambiguous, so filter on these columns when
+a single unambiguous orientation is required. Sites below the 0.80 cutoff get
+`.`: most single-experiment sites, but only ~12% of the ≥100-experiment core.
+Only MA0139.1 is scored; the upstream CTCF motif module and weaker variants are
+not. In CHM13 coordinates use `motif_strand_chm13` (§11.3): in the 1,500 sites
+where the two references carry the segment in opposite orientations the motif
+strand flips with it.
 
 **10.5 IDR peak sets are conservative by construction.** IDR thresholding demands
 reproducibility between replicates, so weak-but-real sites are missed, particularly in
@@ -572,6 +667,7 @@ lifted endpoints, so intervals stay ascending on the minus strand.
 | `chm13_start` / `chm13_end` | lifted interval, 0-based half-open; `-1` unless status is `unique` |
 | `chm13_summit` | lifted summit; `-1` if unmapped |
 | `chm13_strand` | `+` same orientation in both assemblies, `-` **opposite orientation** |
+| `motif_strand_chm13` | `motif_strand` read in CHM13 coordinates: flipped where `chm13_strand` is `-`; `""` if unmapped |
 | `chm13_status` | `unique` / `gapped` / `partial` / `unmapped` (below) |
 
 `unique` — all three positions lifted through one chain and the width is

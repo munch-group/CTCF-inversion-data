@@ -1,0 +1,3 @@
+files:
+  x_chromosome_inversions_gh38.tsv: Emmas long read inversions between humans and chimps (hs1)
+  x_chromosome_inversions_hs1.tsv: Emmas long read inversions between humans and chimps (hg38)
